@@ -1,3 +1,7 @@
+using ChatAgent.Api.Services.OpenAI;
+using ChatAgent.Api.Services.Privy;
+using ChatAgent.Api.Services.Solana;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // CORS for react
@@ -12,6 +16,14 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddControllers();
+builder.Services.AddSingleton<IPrivyService, PrivyService>();
+builder.Services.AddHttpClient<IOpenAiService, OpenAiService>(); 
+
+builder.Services
+    .AddHttpClient<ISolanaAgentService, SolanaAgentService>(client =>
+    {
+        client.BaseAddress = new Uri(builder.Configuration["SolanaAgent:BaseUrl"]!);
+    });
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
