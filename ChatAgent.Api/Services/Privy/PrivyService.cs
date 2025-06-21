@@ -1,58 +1,50 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using ChatAgent.Api.Services.Privy;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 
-namespace ChatAgent.Api.Services.Privy
+namespace ChatAgent.Api.Services.Privy;
+public class PrivyService : IPrivyService
 {
-    public class PrivyService : IPrivyService
+    private readonly IConfigurationManager<OpenIdConnectConfiguration> _configManager;
+    private readonly TokenValidationParameters _validationParams;
+
+    public PrivyService(IConfiguration config)
     {
-        private readonly TokenValidationParameters? _validationParams;
-        private readonly bool _isDevFallback;
+        var jwksUrl  = config["Privy:JwksUrl"]!;
+        var issuer   = config["Privy:Issuer"]!;
+        var audience = config["Privy:Audience"]!;
 
-        public PrivyService(IConfiguration config)
+        _configManager = new ConfigurationManager<OpenIdConnectConfiguration>(
+            jwksUrl,
+            new OpenIdConnectConfigurationRetriever(),
+            new HttpDocumentRetriever { RequireHttps = true }
+        );
+
+        _validationParams = new TokenValidationParameters
         {
-            var jwksUrl  = config["Privy:JwksUrl"]!;
-            var issuer   = config["Privy:Issuer"]!;
-            var audience = config["Privy:Audience"]!;
+            ValidIssuer             = issuer,
+            ValidAudience           = audience,
+            ValidateIssuer          = true,
+            ValidateAudience        = true,
+            ValidateLifetime        = true,
+            ClockSkew               = TimeSpan.FromMinutes(2),
+            IssuerSigningKeyResolver = (token, _, kid, _) =>
+                _configManager
+                    .GetConfigurationAsync(CancellationToken.None)
+                    .Result
+                    .SigningKeys
+        };
+    }
 
-            try
-            {
-                var jwksJson = new HttpClient().GetStringAsync(jwksUrl).Result;
-                var jwks     = new JsonWebKeySet(jwksJson);
+    public ClaimsPrincipal ValidateJwt(string jwt)
+    {
+        if (string.IsNullOrWhiteSpace(jwt))
+            throw new SecurityTokenException("JWT is missing");
 
-                _validationParams = new TokenValidationParameters
-                {
-                    IssuerSigningKeys     = jwks.Keys,
-                    ValidIssuer           = issuer,
-                    ValidAudience         = audience,
-                    ValidateIssuerSigningKey = true,
-                    ValidateIssuer        = true,
-                    ValidateAudience      = true
-                };
-                _isDevFallback = false;
-            }
-            catch
-            {
-                // dev fallback
-                _isDevFallback = true;
-            }
-        }
-
-        public ClaimsPrincipal ValidateJwt(string jwt)
-        {
-            if (_isDevFallback)
-            {
-                // test principal ( fallback )
-                var identity = new ClaimsIdentity(new[]
-                {
-                    new Claim("walletAddress", "dev-wallet-ADDRESS")
-                }, "DevFallback");
-                return new ClaimsPrincipal(identity);
-            }
-
-            var handler   = new JwtSecurityTokenHandler();
-            var principal = handler.ValidateToken(jwt, _validationParams!, out _);
-            return principal;
-        }
+        var handler = new JwtSecurityTokenHandler();
+        return handler.ValidateToken(jwt, _validationParams, out _);
     }
 }
